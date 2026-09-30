@@ -36,11 +36,11 @@ function Reports() {
 
   useEffect(() => {
     Promise.all([
-      fetch("http://127.0.0.1:5000/api/hives").then((res) => res.json()),
-      fetch("http://127.0.0.1:5000/api/honey-batches").then((res) =>
+      fetch("http://https://honey-chain-2.onrender.com/api/hives").then((res) => res.json()),
+      fetch("http://https://honey-chain-2.onrender.com/api/honey-batches").then((res) =>
         res.json()
       ),
-      fetch("http://127.0.0.1:5000/api/quality-tests").then((res) =>
+      fetch("http://https://honey-chain-2.onrender.com/api/quality-tests").then((res) =>
         res.json()
       ),
     ])

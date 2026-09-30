@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react"
 import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  useMap,
+} from "react-leaflet"
+import L from "leaflet"
+import {
   MapPin,
   Navigation,
   Home,
@@ -26,463 +34,402 @@ type HoneyBatch = {
   status: string
 }
 
+type LocationData = {
+  name: string
+  hives: number
+  production: number
+  status: string
+  health: string
+  beeCount: number
+  latitude: number
+  longitude: number
+}
+
+/* Fix Leaflet marker icons */
+const markerIcon = new L.Icon({
+  iconUrl:
+    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  iconRetinaUrl:
+    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  shadowUrl:
+    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+})
+
+/* Center map automatically */
+function MapUpdater({
+  locations,
+}: {
+  locations: LocationData[]
+}) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (locations.length === 1) {
+      map.setView(
+        [locations[0].latitude, locations[0].longitude],
+        12
+      )
+    }
+
+    if (locations.length > 1) {
+      const bounds = L.latLngBounds(
+        locations.map((location) => [
+          location.latitude,
+          location.longitude,
+        ])
+      )
+
+      map.fitBounds(bounds, {
+        padding: [40, 40],
+      })
+    }
+  }, [locations, map])
+
+  return null
+}
+
 function MapsLocations() {
   const [hives, setHives] = useState<Hive[]>([])
   const [batches, setBatches] = useState<HoneyBatch[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    Promise.all([
-      fetch("http://127.0.0.1:5000/api/hives").then((res) => res.json()),
-      fetch("http://127.0.0.1:5000/api/honey-batches").then((res) =>
-        res.json()
-      ),
-    ])
-      .then(([hiveData, batchData]) => {
-        setHives(hiveData.hives || [])
-        setBatches(batchData.batches || [])
-      })
-      .catch((error) => {
-        console.error("Error loading location data:", error)
-      })
+    const loadData = async () => {
+      try {
+        const [hivesResponse, batchesResponse] =
+          await Promise.all([
+            fetch("http://https://honey-chain-2.onrender.com/api/hives"),
+            fetch("http://https://honey-chain-2.onrender.com/api/honey-batches"),
+          ])
+
+        const hivesData = await hivesResponse.json()
+        const batchesData = await batchesResponse.json()
+
+        setHives(hivesData.hives || [])
+        setBatches(batchesData.batches || [])
+      } catch (error) {
+        console.error("Failed to load map data:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadData()
   }, [])
 
-  /* -----------------------------
-     LOCATION DATA
-  ----------------------------- */
+  /*
+    Temporary coordinates for locations.
 
-  const locations = Array.from(
-    new Set(hives.map((hive) => hive.location))
-  )
+    Your database currently stores the location name
+    but does not yet contain latitude/longitude columns.
+
+    These coordinates allow the real map to work now.
+  */
+  const coordinateMap: Record<
+    string,
+    [number, number]
+  > = {
+    "Test Farm": [11.0168, 76.9558],
+    Coimbatore: [11.0168, 76.9558],
+    Ooty: [11.4102, 76.6950],
+    Kodaikanal: [10.2381, 77.4892],
+    Chennai: [13.0827, 80.2707],
+  }
+
+  const locations: LocationData[] = []
+
+  const uniqueLocations = [
+    ...new Set(hives.map((hive) => hive.location)),
+  ]
+
+  uniqueLocations.forEach((locationName) => {
+    const locationHives = hives.filter(
+      (hive) => hive.location === locationName
+    )
+
+    const hiveCodes = locationHives.map(
+      (hive) => hive.hive_code
+    )
+
+    const locationBatches = batches.filter((batch) =>
+      hiveCodes.includes(batch.hive_code)
+    )
+
+    const production = locationBatches.reduce(
+      (total, batch) =>
+        total + Number(batch.quantity_kg),
+      0
+    )
+
+    const hasCritical = locationHives.some(
+      (hive) =>
+        hive.hive_health.toLowerCase() === "critical"
+    )
+
+    const hasWarning = locationHives.some(
+      (hive) =>
+        hive.hive_health.toLowerCase() === "warning"
+    )
+
+    let status = "Healthy"
+
+    if (hasCritical) {
+      status = "Critical"
+    } else if (hasWarning) {
+      status = "Attention"
+    }
+
+    const coordinates =
+      coordinateMap[locationName] || [
+        11.0168,
+        76.9558,
+      ]
+
+    locations.push({
+      name: locationName,
+      hives: locationHives.length,
+      production,
+      status,
+      health: locationHives[0]?.hive_health || "Unknown",
+      beeCount: locationHives.reduce(
+        (total, hive) =>
+          total + Number(hive.bee_count),
+        0
+      ),
+      latitude: coordinates[0],
+      longitude: coordinates[1],
+    })
+  })
 
   const totalFarms = locations.length
 
-  const activeLocations = locations.filter((location) =>
-    hives.some(
-      (hive) =>
-        hive.location === location &&
-        hive.hive_health.toLowerCase() === "good"
-    )
+  const activeLocations = locations.filter(
+    (location) => location.status !== "Critical"
   ).length
 
   const totalHives = hives.length
 
-  const getHivesForLocation = (location: string) =>
-    hives.filter((hive) => hive.location === location)
-
-  const getProductionForLocation = (location: string) => {
-    const locationHives = getHivesForLocation(location).map(
-      (hive) => hive.hive_code
-    )
-
-    return batches
-      .filter((batch) => locationHives.includes(batch.hive_code))
-      .reduce(
-        (total, batch) => total + Number(batch.quantity_kg),
-        0
-      )
-  }
-
-  const getLocationStatus = (location: string) => {
-    const locationHives = getHivesForLocation(location)
-
-    if (
-      locationHives.some(
-        (hive) => hive.hive_health.toLowerCase() === "critical"
-      )
-    ) {
-      return "Critical"
-    }
-
-    if (
-      locationHives.some(
-        (hive) => hive.hive_health.toLowerCase() === "warning"
-      )
-    ) {
-      return "Attention"
-    }
-
-    return "Healthy"
-  }
-
   return (
     <div className="space-y-8">
-
       {/* Header */}
       <div>
-        <p className="text-sm text-cyan-400">
-          LOCATION MANAGEMENT
-        </p>
-
-        <h1 className="mt-1 text-3xl font-bold text-white">
+        <h1 className="text-3xl font-bold text-white">
           Maps & Locations
         </h1>
 
         <p className="mt-2 text-gray-400">
-          Track apiaries, hive locations and honey production sites.
+          Real-time geographical view of Honey Chain
+          hive locations
         </p>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid gap-5 md:grid-cols-3">
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        <div className="rounded-2xl border border-yellow-500/20 bg-[#0b0f14] p-6">
+          <div className="flex items-center gap-3">
+            <MapPin className="text-yellow-400" />
 
-        <div className="rounded-2xl border border-cyan-400/10 bg-[#0b0f15] p-5">
-
-          <div className="flex items-center justify-between">
-
-            <p className="text-sm text-gray-400">
+            <span className="text-gray-400">
               Total Locations
-            </p>
-
-            <MapPin
-              className="text-cyan-400"
-              size={22}
-            />
-
+            </span>
           </div>
 
-          <h2 className="mt-3 text-3xl font-bold text-white">
+          <p className="mt-3 text-3xl font-bold text-white">
             {totalFarms}
-          </h2>
-
-          <p className="mt-2 text-xs text-gray-500">
-            Based on registered hive locations
           </p>
-
         </div>
 
-        <div className="rounded-2xl border border-green-400/10 bg-[#0b0f15] p-5">
+        <div className="rounded-2xl border border-green-500/20 bg-[#0b0f14] p-6">
+          <div className="flex items-center gap-3">
+            <Activity className="text-green-400" />
 
-          <div className="flex items-center justify-between">
-
-            <p className="text-sm text-gray-400">
+            <span className="text-gray-400">
               Active Locations
-            </p>
-
-            <Activity
-              className="text-green-400"
-              size={22}
-            />
-
+            </span>
           </div>
 
-          <h2 className="mt-3 text-3xl font-bold text-white">
+          <p className="mt-3 text-3xl font-bold text-white">
             {activeLocations}
-          </h2>
-
-          <p className="mt-2 text-xs text-green-400">
-            Locations with healthy hives
           </p>
-
         </div>
 
-        <div className="rounded-2xl border border-yellow-400/10 bg-[#0b0f15] p-5">
+        <div className="rounded-2xl border border-blue-500/20 bg-[#0b0f14] p-6">
+          <div className="flex items-center gap-3">
+            <Home className="text-blue-400" />
 
-          <div className="flex items-center justify-between">
-
-            <p className="text-sm text-gray-400">
+            <span className="text-gray-400">
               Total Hives
-            </p>
-
-            <Home
-              className="text-yellow-400"
-              size={22}
-            />
-
+            </span>
           </div>
 
-          <h2 className="mt-3 text-3xl font-bold text-white">
+          <p className="mt-3 text-3xl font-bold text-white">
             {totalHives}
-          </h2>
-
-          <p className="mt-2 text-xs text-gray-500">
-            Across registered locations
           </p>
-
         </div>
-
       </div>
 
-      {/* Map Area */}
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0b0f15]">
-
-        <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
-
-          <div>
-
-            <h2 className="text-lg font-semibold text-white">
-              Apiary Locations
-            </h2>
-
-            <p className="mt-1 text-xs text-gray-500">
-              Geographic distribution of Honey Chain locations
-            </p>
-
-          </div>
-
-          <button
-            onClick={() =>
-              window.alert(
-                "Map integration can be connected to real GPS coordinates later."
-              )
-            }
-            className="flex items-center gap-2 rounded-xl bg-cyan-400/10 px-4 py-2 text-sm text-cyan-400 hover:bg-cyan-400/20"
-          >
-            <Navigation size={16} />
-            Locate
-          </button>
-
-        </div>
-
-        {/* Map Preview */}
-        <div className="relative h-[380px] overflow-hidden bg-[#080d13]">
-
-          <div className="absolute inset-0 opacity-30">
-
-            <div className="h-full w-full bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:45px_45px]" />
-
-          </div>
-
-          {/* Dynamic location markers */}
-          {locations.map((location, index) => {
-
-            const status = getLocationStatus(location)
-
-            const positions = [
-              { left: "20%", top: "30%" },
-              { left: "48%", top: "22%" },
-              { left: "70%", top: "48%" },
-              { left: "35%", top: "60%" },
-              { left: "78%", top: "25%" },
-            ]
-
-            const position =
-              positions[index % positions.length]
-
-            const markerColor =
-              status === "Healthy"
-                ? "text-green-400 fill-green-400"
-                : status === "Attention"
-                  ? "text-yellow-400 fill-yellow-400"
-                  : "text-red-400 fill-red-400"
-
-            return (
-              <div
-                key={location}
-                className="absolute"
-                style={{
-                  left: position.left,
-                  top: position.top,
-                }}
-              >
-
-                <div className="group relative">
-
-                  <MapPin
-                    size={34}
-                    className={`${markerColor} drop-shadow-[0_0_12px_rgba(34,211,238,0.7)]`}
-                  />
-
-                  <div className="absolute left-8 top-0 hidden w-52 rounded-xl border border-white/10 bg-[#10161e] p-3 shadow-xl group-hover:block">
-
-                    <p className="font-semibold text-white">
-                      {location}
-                    </p>
-
-                    <p className="mt-1 text-xs text-gray-400">
-                      {getHivesForLocation(location).length} hives
-                    </p>
-
-                    <p className="mt-2 text-xs text-cyan-400">
-                      {getProductionForLocation(location).toFixed(2)} kg production
-                    </p>
-
-                    <p
-                      className={`mt-1 text-xs ${
-                        status === "Healthy"
-                          ? "text-green-400"
-                          : status === "Attention"
-                            ? "text-yellow-400"
-                            : "text-red-400"
-                      }`}
-                    >
-                      {status}
-                    </p>
-
-                  </div>
-
-                </div>
-
-              </div>
-            )
-          })}
-
-          {/* Map label */}
-          <div className="absolute bottom-5 left-5 rounded-xl border border-white/10 bg-[#10161e]/90 px-4 py-3 backdrop-blur">
-
-            <p className="text-xs text-gray-500">
-              MAP PREVIEW
-            </p>
-
-            <p className="mt-1 text-sm text-white">
-              Honey Chain Apiary Network
-            </p>
-
-          </div>
-
-        </div>
-
-      </div>
-
-      {/* Locations List */}
-      <div className="rounded-2xl border border-white/10 bg-[#0b0f15]">
-
-        <div className="border-b border-white/10 px-6 py-5">
-
-          <h2 className="text-lg font-semibold text-white">
-            Registered Locations
+      {/* Real Map */}
+      <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0b0f14]">
+        <div className="border-b border-white/10 px-6 py-4">
+          <h2 className="text-xl font-semibold text-white">
+            Honey Chain Map
           </h2>
 
-          <p className="mt-1 text-xs text-gray-500">
-            Farm and production location details from Honey Chain
+          <p className="mt-1 text-sm text-gray-400">
+            Interactive map powered by OpenStreetMap
           </p>
-
         </div>
 
-        <div className="divide-y divide-white/5">
+        <div className="h-[500px] w-full">
+          {!loading && (
+            <MapContainer
+              center={[11.0168, 76.9558]}
+              zoom={7}
+              scrollWheelZoom={true}
+              className="h-full w-full"
+            >
+              <TileLayer
+                attribution='&copy; OpenStreetMap contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
 
-          {locations.length > 0 ? (
+              <MapUpdater locations={locations} />
 
-            locations.map((location) => {
-
-              const locationHives =
-                getHivesForLocation(location)
-
-              const production =
-                getProductionForLocation(location)
-
-              const status =
-                getLocationStatus(location)
-
-              return (
-                <div
-                  key={location}
-                  className="flex flex-col gap-4 p-6 transition hover:bg-white/[0.02] md:flex-row md:items-center md:justify-between"
+              {locations.map((location) => (
+                <Marker
+                  key={location.name}
+                  position={[
+                    location.latitude,
+                    location.longitude,
+                  ]}
+                  icon={markerIcon}
                 >
+                  <Popup>
+                    <div className="min-w-[220px]">
+                      <h3 className="text-lg font-bold">
+                        {location.name}
+                      </h3>
 
-                  <div className="flex items-center gap-4">
+                      <div className="mt-2 space-y-1 text-sm">
+                        <p>
+                          <strong>Hives:</strong>{" "}
+                          {location.hives}
+                        </p>
 
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-400/10">
+                        <p>
+                          <strong>Bee Count:</strong>{" "}
+                          {location.beeCount.toLocaleString()}
+                        </p>
 
-                      <MapPin
-                        size={20}
-                        className="text-cyan-400"
-                      />
+                        <p>
+                          <strong>Production:</strong>{" "}
+                          {location.production.toFixed(2)} kg
+                        </p>
 
+                        <p>
+                          <strong>Health:</strong>{" "}
+                          {location.health}
+                        </p>
+
+                        <p>
+                          <strong>Status:</strong>{" "}
+                          {location.status}
+                        </p>
+                      </div>
                     </div>
-
-                    <div>
-
-                      <p className="font-semibold text-white">
-                        {location}
-                      </p>
-
-                      <p className="mt-1 text-xs text-gray-500">
-                        Honey Chain registered location
-                      </p>
-
-                    </div>
-
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-6">
-
-                    <div>
-
-                      <p className="text-xs text-gray-500">
-                        Hives
-                      </p>
-
-                      <p className="mt-1 text-sm text-white">
-                        {locationHives.length}
-                      </p>
-
-                    </div>
-
-                    <div>
-
-                      <p className="text-xs text-gray-500">
-                        Production
-                      </p>
-
-                      <p className="mt-1 text-sm text-white">
-                        {production.toFixed(2)} kg
-                      </p>
-
-                    </div>
-
-                    <div>
-
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs ${
-                          status === "Healthy"
-                            ? "bg-green-400/10 text-green-400"
-                            : status === "Attention"
-                              ? "bg-orange-400/10 text-orange-400"
-                              : "bg-red-400/10 text-red-400"
-                        }`}
-                      >
-                        {status}
-                      </span>
-
-                    </div>
-
-                  </div>
-
-                </div>
-              )
-            })
-
-          ) : (
-
-            <div className="p-8 text-center text-gray-500">
-              No location data available.
-            </div>
-
+                  </Popup>
+                </Marker>
+              ))}
+            </MapContainer>
           )}
-
         </div>
-
       </div>
 
-      {/* Data Source */}
-      <div className="rounded-xl border border-cyan-400/10 bg-cyan-400/[0.03] p-5">
+      {/* Location list */}
+      <div>
+        <h2 className="mb-4 text-xl font-semibold text-white">
+          Registered Locations
+        </h2>
 
-        <div className="flex gap-3">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {locations.map((location) => (
+            <div
+              key={location.name}
+              className="rounded-2xl border border-white/10 bg-[#0b0f14] p-5"
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="font-semibold text-white">
+                    {location.name}
+                  </h3>
 
-          <MapPin
-            size={20}
-            className="mt-0.5 text-cyan-400"
-          />
+                  <p className="mt-1 text-sm text-gray-400">
+                    {location.hives} hive
+                    {location.hives !== 1
+                      ? "s"
+                      : ""}
+                  </p>
+                </div>
 
-          <div>
+                <MapPin className="text-yellow-400" />
+              </div>
 
-            <p className="text-sm font-medium text-cyan-300">
-              Location Data
-            </p>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-gray-500">
+                    Production
+                  </p>
 
-            <p className="mt-1 text-xs leading-5 text-gray-500">
-              Location information is currently derived from the
-              location values stored with Honey Chain hive records.
-              GPS-based map coordinates can be integrated later
-              using Leaflet and OpenStreetMap.
-            </p>
+                  <p className="mt-1 font-semibold text-yellow-400">
+                    {location.production.toFixed(2)} kg
+                  </p>
+                </div>
 
-          </div>
+                <div>
+                  <p className="text-xs text-gray-500">
+                    Status
+                  </p>
 
+                  <p className="mt-1 font-semibold text-green-400">
+                    {location.status}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  window.scrollTo({
+                    top: 0,
+                    behavior: "smooth",
+                  })
+                }}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-yellow-500/30 px-4 py-2 text-sm text-yellow-400 transition hover:bg-yellow-500/10"
+              >
+                <Navigation size={16} />
+                View on Map
+              </button>
+            </div>
+          ))}
         </div>
-
       </div>
 
+      {/* Information */}
+      <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5">
+        <p className="text-sm text-gray-300">
+          <span className="font-semibold text-blue-400">
+            Map data:
+          </span>{" "}
+          Hive and honey production information is
+          loaded from the Honey Chain database. Map
+          coordinates are currently assigned to the
+          registered location names and can later be
+          replaced with exact GPS coordinates.
+        </p>
+      </div>
     </div>
   )
 }

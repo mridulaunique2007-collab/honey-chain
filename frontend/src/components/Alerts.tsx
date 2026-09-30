@@ -42,13 +42,13 @@ function Alerts() {
 
   useEffect(() => {
     Promise.all([
-      fetch("http://127.0.0.1:5000/api/sensor-data").then((res) =>
+      fetch("http://https://honey-chain-2.onrender.com/api/sensor-data").then((res) =>
         res.json()
       ),
-      fetch("http://127.0.0.1:5000/api/hives").then((res) =>
+      fetch("http://https://honey-chain-2.onrender.com/api/hives").then((res) =>
         res.json()
       ),
-      fetch("http://127.0.0.1:5000/api/quality-tests").then((res) =>
+      fetch("http://https://honey-chain-2.onrender.com/api/quality-tests").then((res) =>
         res.json()
       ),
     ])

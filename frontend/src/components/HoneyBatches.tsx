@@ -18,7 +18,7 @@ function HoneyBatches() {
   const [error, setError] = useState("")
 
   useEffect(() => {
-    fetch("http://127.0.0.1:5000/api/honey-batches")
+    fetch("http://https://honey-chain-2.onrender.com/api/honey-batches")
       .then((response) => {
         if (!response.ok) {
           throw new Error("Failed to fetch honey batch data")

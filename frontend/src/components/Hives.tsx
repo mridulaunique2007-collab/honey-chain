@@ -16,7 +16,7 @@ function Hives() {
   const [error, setError] = useState("")
 
   useEffect(() => {
-    fetch("http://127.0.0.1:5000/api/hives")
+    fetch("http://https://honey-chain-2.onrender.com/api/hives")
       .then((response) => {
         if (!response.ok) {
           throw new Error("Failed to fetch hive data")
